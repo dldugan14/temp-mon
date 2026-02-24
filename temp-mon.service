@@ -1,0 +1,19 @@
+[Unit]
+Description=Temp-Mon Temperature Monitor
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/temp-mon
+ExecStart=/usr/bin/python3 /home/pi/temp-mon/backend/main.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Allow GPIO access
+SupplementaryGroups=gpio
+
+[Install]
+WantedBy=multi-user.target
