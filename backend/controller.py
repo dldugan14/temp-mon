@@ -1,7 +1,10 @@
 """
-Background control loop.
-Reads all sensors every POLL_INTERVAL seconds, evaluates thresholds, and
-actuates the fan / battery relays accordingly.
+Temp-Mon background control loop.
+
+Reads all sensors (1-Wire DS18B20 + RS485 Modbus) every POLL_INTERVAL
+seconds, evaluates thresholds, and actuates the fan / battery relays.
+
+CAN bus relay commands are handled in a parallel async task.
 """
 from __future__ import annotations
 
@@ -10,11 +13,14 @@ import logging
 import math
 import os
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from typing import Any, Dict, List
 
-from sensors import SensorReading, read_all
+from sensors import SensorReading, read_all as read_1wire
+from modbus_sensors import read_all as read_modbus, ModbusSensorReading
 from relay import Relay, cleanup_all
+import can_commander
+from can_commander import CanStatus
 
 log = logging.getLogger(__name__)
 
@@ -51,6 +57,7 @@ class Controller:
     def __init__(self) -> None:
         self.fan_relay = Relay("fan", FAN_PIN)
         self.bat_relay = Relay("battery", BAT_PIN)
+        self.can_status = CanStatus()
         self._last_state: SystemState | None = None
         self._listeners: list[asyncio.Queue] = []
 
@@ -79,12 +86,14 @@ class Controller:
 
     # ── Serialisation ──────────────────────────────────────────────────────────
 
-    @staticmethod
-    def _serialise(state: SystemState) -> Dict[str, Any]:
+    def _serialise(self, state: SystemState) -> Dict[str, Any]:
         sensors = []
         for s in state.sensors:
             temp = s["temperature"]
-            sensors.append({**s, "temperature": None if (temp is None or (isinstance(temp, float) and math.isnan(temp))) else temp})
+            sensors.append({
+                **s,
+                "temperature": None if (temp is None or (isinstance(temp, float) and math.isnan(temp))) else temp,
+            })
         return {
             "sensors": sensors,
             "relays": {
@@ -93,50 +102,60 @@ class Controller:
             },
             "timestamp": state.timestamp,
             "config": {
-                "fan_on_temp":  state.fan_on_temp,
-                "fan_off_temp": state.fan_off_temp,
-                "bat_on_temp":  state.bat_on_temp,
-                "bat_off_temp": state.bat_off_temp,
+                "fan_on_temp":   state.fan_on_temp,
+                "fan_off_temp":  state.fan_off_temp,
+                "bat_on_temp":   state.bat_on_temp,
+                "bat_off_temp":  state.bat_off_temp,
                 "poll_interval": POLL_INTERVAL,
             },
+            "can": self.can_status.to_dict(),
         }
 
-    # ── Control logic ──────────────────────────────────────────────────────────
+    # ── Sensor merging + control logic ────────────────────────────────────────
 
     @staticmethod
-    def _valid_temps(readings: List[SensorReading]) -> List[float]:
-        return [r.temperature for r in readings if not r.error and not math.isnan(r.temperature)]
+    def _merge_sensors(
+        onewire: List[SensorReading],
+        modbus: List[ModbusSensorReading],
+    ) -> List[Dict[str, Any]]:
+        result: List[Dict[str, Any]] = []
+        idx = 0
+        for r in list(onewire) + list(modbus):  # type: ignore[operator]
+            result.append({
+                "index":       idx,
+                "sensor_id":   r.sensor_id,
+                "name":        r.name,
+                "bus":         r.bus,
+                "temperature": r.temperature,
+                "error":       r.error,
+            })
+            idx += 1
+        return result
 
-    def _evaluate(self, readings: List[SensorReading]) -> None:
-        temps = self._valid_temps(readings)
+    @staticmethod
+    def _valid_temps(sensor_dicts: List[Dict[str, Any]]) -> List[float]:
+        return [
+            s["temperature"] for s in sensor_dicts
+            if not s["error"]
+            and s["temperature"] is not None
+            and not math.isnan(s["temperature"])
+        ]
+
+    def _evaluate(self, sensor_dicts: List[Dict[str, Any]]) -> None:
+        temps = self._valid_temps(sensor_dicts)
         if not temps:
             return
-
         max_temp = max(temps)
-        min_temp = min(temps)
-
-        # Hysteretic control
         if max_temp >= FAN_ON_TEMP:
             self.fan_relay.set_auto(True)
         elif max_temp <= FAN_OFF_TEMP:
             self.fan_relay.set_auto(False)
-
         if max_temp >= BAT_ON_TEMP:
             self.bat_relay.set_auto(True)
         elif max_temp <= BAT_OFF_TEMP:
             self.bat_relay.set_auto(False)
 
-    def _build_state(self, readings: List[SensorReading]) -> SystemState:
-        sensor_dicts = [
-            {
-                "index": r.index,
-                "sensor_id": r.sensor_id,
-                "name": r.name,
-                "temperature": r.temperature,
-                "error": r.error,
-            }
-            for r in readings
-        ]
+    def _build_state(self, sensor_dicts: List[Dict[str, Any]]) -> SystemState:
         return SystemState(
             sensors=sensor_dicts,
             relays={
@@ -149,6 +168,20 @@ class Controller:
             bat_on_temp=BAT_ON_TEMP,
             bat_off_temp=BAT_OFF_TEMP,
         )
+
+    def can_relay_callback(self, relay_name: str, action: str) -> None:
+        """Called by the CAN listener when a valid relay command frame arrives."""
+        target = self.fan_relay if relay_name == "fan" else self.bat_relay
+        if action == "on":
+            target.set_override(True)
+        elif action == "off":
+            target.set_override(False)
+        elif action == "auto":
+            target.clear_override()
+        if self._last_state:
+            state = self._build_state(self._last_state.sensors)
+            self._last_state = state
+            self._broadcast(state)
 
     # ── Public helpers for REST ────────────────────────────────────────────────
 
@@ -173,34 +206,34 @@ class Controller:
         self._refresh_state(force_broadcast=True)
         return True
 
-    def _refresh_state(self, readings: List[SensorReading] | None = None, force_broadcast: bool = False) -> None:
-        if readings is None and self._last_state:
-            # Re-use last sensor data, just refresh relay status
-            last_sensors = [
-                SensorReading(
-                    index=s["index"], sensor_id=s["sensor_id"],
-                    name=s["name"], temperature=s["temperature"] or float("nan"),
-                    error=s["error"],
-                )
-                for s in self._last_state.sensors
-            ]
-            readings = last_sensors
-        if readings:
-            state = self._build_state(readings)
+    def _refresh_state(self, sensor_dicts: List[Dict[str, Any]] | None = None, force_broadcast: bool = False) -> None:
+        if sensor_dicts is None and self._last_state:
+            sensor_dicts = self._last_state.sensors
+        if sensor_dicts:
+            state = self._build_state(sensor_dicts)
             self._last_state = state
             if force_broadcast:
                 self._broadcast(state)
 
-    # ── Main loop ──────────────────────────────────────────────────────────────
+    # ── Main sensor-polling loop ──────────────────────────────────────────────
 
     async def run(self) -> None:
         log.info("Controller started – poll every %ss", POLL_INTERVAL)
+
+        # Start CAN commander as a background task
+        asyncio.create_task(
+            can_commander.run(self.can_status, self.can_relay_callback),
+            name="can-commander",
+        )
+
         try:
             while True:
                 try:
-                    readings = read_all()
-                    self._evaluate(readings)
-                    state = self._build_state(readings)
+                    onewire = read_1wire()
+                    modbus  = read_modbus()
+                    sensor_dicts = self._merge_sensors(onewire, modbus)
+                    self._evaluate(sensor_dicts)
+                    state = self._build_state(sensor_dicts)
                     self._last_state = state
                     self._broadcast(state)
                 except Exception as exc:

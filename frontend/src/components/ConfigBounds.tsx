@@ -47,7 +47,7 @@ interface Props {
 export default function ConfigBounds({ config }: Props) {
   return (
     <>
-      <Typography variant="overline" color="text.secondary" sx={{ pl: 0.5 }}>
+      <Typography variant="overline" color="text.secondary">
         Configured Thresholds
       </Typography>
       <Card>

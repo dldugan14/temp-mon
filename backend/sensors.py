@@ -23,11 +23,12 @@ _sim_direction: list[float] = [random.choice([-1, 1]) * 0.1 for _ in range(NUM_S
 
 @dataclass
 class SensorReading:
-    index: int          # 0-based
+    index: int          # 0-based (across all sensors combined)
     sensor_id: str      # e.g. "28-0000089abcd1"
     name: str           # "Sensor 1" .. "Sensor 8"
     temperature: float  # °C
     error: bool = False
+    bus: str = "1wire"  # "1wire" | "modbus"
 
 
 def _discover_devices() -> List[str]:
@@ -68,6 +69,7 @@ def _simulate() -> List[SensorReading]:
                 sensor_id=f"28-sim{i:012x}",
                 name=f"Sensor {i + 1}",
                 temperature=round(_sim_temps[i], 2),
+                bus="1wire",
             )
         )
     return readings
@@ -93,17 +95,18 @@ def read_all() -> List[SensorReading]:
                         sensor_id=sensor_id,
                         name=f"Sensor {i + 1}",
                         temperature=round(temp, 2),
+                        bus="1wire",
                     )
                 )
             else:
                 readings.append(
                     SensorReading(index=i, sensor_id=sensor_id, name=f"Sensor {i + 1}",
-                                  temperature=float("nan"), error=True)
+                                  temperature=float("nan"), error=True, bus="1wire")
                 )
         else:
             readings.append(
                 SensorReading(index=i, sensor_id=f"28-missing{i}", name=f"Sensor {i + 1}",
-                              temperature=float("nan"), error=True)
+                              temperature=float("nan"), error=True, bus="1wire")
             )
 
     return readings
