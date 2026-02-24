@@ -7,6 +7,17 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+VENV_DIR="$SCRIPT_DIR/.venv"
+
+if [[ ! -f "$VENV_DIR/bin/python" ]]; then
+  echo "ERROR: Virtual environment not found. Run ./install.sh first."
+  exit 1
+fi
+
+# Activate venv
+# shellcheck source=/dev/null
+source "$VENV_DIR/bin/activate"
+
 # Load PORT from .env if present
 PORT=$(grep -E "^PORT=" .env 2>/dev/null | cut -d= -f2 | tr -d '[:space:]') || PORT=8000
 
