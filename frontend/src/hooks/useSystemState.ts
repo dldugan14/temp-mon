@@ -59,3 +59,7 @@ export async function setRelayOverride(relay: string, on: boolean): Promise<void
 export async function clearRelayOverride(relay: string): Promise<void> {
   await fetch(`/api/relay/${relay}/override`, { method: "DELETE" });
 }
+
+export async function setCanEnabled(enabled: boolean): Promise<void> {
+  await fetch(`/api/can/enabled?state=${enabled}`, { method: "PUT" });
+}

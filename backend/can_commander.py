@@ -69,20 +69,18 @@ class CanStatus:
 
 async def run(status: CanStatus, relay_callback) -> None:
     """
-    Async task that listens for CAN frames and calls relay_callback(relay_name, command).
+    Async task that loops forever, respecting status.enabled at runtime.
     relay_callback("fan" | "battery", "on" | "off" | "auto")
-    """
-    if not ENABLED:
-        log.info("CAN commander disabled (CAN_ENABLED=false)")
-        return
 
+    When status.enabled is False the loop idles (1 s sleep) so that setting
+    it back to True re-activates the bus without restarting the process.
+    """
     if SIMULATE:
         log.info("CAN commander in simulation mode – no real CAN bus")
         status.error = "simulation mode"
-        return
-
-    # Bring up the CAN interface if not already up
-    await _ensure_interface_up(status)
+        # Keep looping so runtime enable/disable changes are reflected in status
+        while True:
+            await asyncio.sleep(5)
 
     try:
         import can  # type: ignore
@@ -90,9 +88,16 @@ async def run(status: CanStatus, relay_callback) -> None:
         msg = "python-can not installed – CAN commander inactive"
         log.error(msg)
         status.record_error(msg)
-        return
+        return   # No point looping without the library
 
     while True:
+        if not status.enabled:
+            await asyncio.sleep(1)
+            continue
+
+        # Bring up the CAN interface if not already up
+        await _ensure_interface_up(status)
+
         try:
             bus = can.Bus(channel=INTERFACE, interface="socketcan")
             log.info("CAN commander listening on %s (ID 0x%X)", INTERFACE, CMD_ID)
@@ -103,6 +108,11 @@ async def run(status: CanStatus, relay_callback) -> None:
 
             try:
                 async for msg in reader:
+                    # Honour runtime disable – break so bus gets shut down cleanly
+                    if not status.enabled:
+                        log.info("CAN commander disabled at runtime – closing bus")
+                        break
+
                     if msg.arbitration_id != CMD_ID:
                         continue
                     if len(msg.data) < 2:
@@ -134,7 +144,7 @@ async def run(status: CanStatus, relay_callback) -> None:
             msg = f"CAN error: {exc}"
             log.error(msg)
             status.record_error(msg)
-            await asyncio.sleep(5)   # back-off before reconnect
+            await asyncio.sleep(5 if status.enabled else 1)  # back-off before retry
 
 
 async def _ensure_interface_up(status: CanStatus) -> None:

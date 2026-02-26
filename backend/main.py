@@ -123,6 +123,13 @@ async def clear_override(name: str):
     return {"relay": name, "is_overridden": False}
 
 
+@app.put("/api/can/enabled")
+async def set_can_enabled(state: bool):
+    """Enable or disable the CAN bus commander at runtime."""
+    controller.set_can_enabled(state)
+    return {"can_enabled": state}
+
+
 # ── Static frontend ───────────────────────────────────────────────────────────
 _dist = Path(__file__).parent.parent / "frontend" / "dist"
 if _dist.exists():

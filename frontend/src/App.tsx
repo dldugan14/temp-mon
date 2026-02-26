@@ -33,7 +33,7 @@ export default function App() {
                 config={state.config}
               />
               <RelayPanel relays={state.relays} />
-              <ConfigBounds config={state.config} />
+              <ConfigBounds config={state.config} can={state.can} />
             </>
           )}
 

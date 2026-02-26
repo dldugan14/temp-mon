@@ -22,6 +22,9 @@ from relay import Relay, cleanup_all
 import can_commander
 from can_commander import CanStatus
 
+# ── Feature flags (initial values from env; can be toggled at runtime) ────────────
+CAN_ENABLED = os.getenv("CAN_ENABLED", "true").lower() == "true"
+
 log = logging.getLogger(__name__)
 
 # ── Config from env ────────────────────────────────────────────────────────────
@@ -169,6 +172,12 @@ class Controller:
             bat_off_temp=BAT_OFF_TEMP,
         )
 
+    def set_can_enabled(self, enabled: bool) -> None:
+        """Toggle the CAN commander on or off at runtime."""
+        self.can_status.enabled = enabled
+        log.info("CAN commander %s at runtime", "enabled" if enabled else "disabled")
+        self._refresh_state(force_broadcast=True)
+
     def can_relay_callback(self, relay_name: str, action: str) -> None:
         """Called by the CAN listener when a valid relay command frame arrives."""
         target = self.fan_relay if relay_name == "fan" else self.bat_relay
@@ -220,7 +229,7 @@ class Controller:
     async def run(self) -> None:
         log.info("Controller started – poll every %ss", POLL_INTERVAL)
 
-        # Start CAN commander as a background task
+        # Start CAN commander – it loops forever and respects can_status.enabled at runtime
         asyncio.create_task(
             can_commander.run(self.can_status, self.can_relay_callback),
             name="can-commander",

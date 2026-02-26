@@ -21,6 +21,16 @@ export interface Config {
   poll_interval: number;
 }
 
+export interface CanStatus {
+  enabled: boolean;
+  interface: string;
+  last_cmd_at: number | null;
+  last_cmd_relay: string | null;
+  last_cmd_action: string | null;
+  error: string | null;
+  frame_count: number;
+}
+
 export interface SystemState {
   sensors: SensorData[];
   relays: {
@@ -29,4 +39,5 @@ export interface SystemState {
   };
   timestamp: number;
   config: Config;
+  can?: CanStatus;
 }
