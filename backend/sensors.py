@@ -14,7 +14,7 @@ from typing import List
 
 SIMULATE = os.getenv("SIMULATE", "false").lower() == "true"
 W1_BASE = "/sys/bus/w1/devices"
-NUM_SENSORS = 1
+NUM_SENSORS = 7
 
 # Simulated state – drifts slowly so the UI looks alive
 _sim_temps: list[float] = [22.0 + random.uniform(-2, 2) for _ in range(NUM_SENSORS)]
