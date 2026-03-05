@@ -21,7 +21,7 @@ log = logging.getLogger(__name__)
 
 # ── Config ────────────────────────────────────────────────────────────────────
 SIMULATE       = os.getenv("SIMULATE", "false").lower() == "true"
-ENABLED        = os.getenv("MODBUS_ENABLED", "true").lower() == "true"
+ENABLED        = os.getenv("MODBUS_ENABLED", "false").lower() == "true"
 PORT           = os.getenv("MODBUS_PORT", "/dev/ttyUSB0")
 BAUD           = int(os.getenv("MODBUS_BAUD", "9600"))
 UNIT_IDS_RAW   = os.getenv("MODBUS_UNIT_IDS", "1,2,3")
