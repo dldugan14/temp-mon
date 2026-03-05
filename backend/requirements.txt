@@ -3,6 +3,7 @@ uvicorn[standard]>=0.24.0
 python-dotenv>=1.0.0
 # RS485 / Modbus RTU
 pymodbus>=3.6.0
+pyserial>=3.5
 # CAN bus (python-can with socketcan backend – Linux/Pi only)
 python-can>=4.3.0
 # RPi.GPIO is only available on Raspberry Pi – installed by install.sh on Pi hardware:
