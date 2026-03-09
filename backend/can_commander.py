@@ -185,8 +185,8 @@ async def _ensure_interface_up(status: CanStatus) -> None:
         _, stderr = await proc.communicate()
         if proc.returncode != 0:
             err = stderr.decode().strip()
-            # "already up" is not a real error
-            if "already" not in err.lower() and err:
+            # "already up" / "busy" is not a real error
+            if "already" not in err.lower() and "busy" not in err.lower() and err:
                 log.warning("ip link set %s up: %s", INTERFACE, err)
                 status.record_error(f"interface bring-up: {err}")
         else:
