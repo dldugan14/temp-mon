@@ -22,7 +22,7 @@ import time
 log = logging.getLogger(__name__)
 
 # ── Config ────────────────────────────────────────────────────────────────────
-ENABLED       = os.getenv("CAN_ENABLED", "true").lower() == "true"
+ENABLED       = os.getenv("CAN_ENABLED", "false").lower() == "true"
 INTERFACE     = os.getenv("CAN_INTERFACE", "can0")
 BITRATE       = int(os.getenv("CAN_BITRATE", "500000"))
 CMD_ID_RAW    = os.getenv("CAN_RELAY_CMD_ID", "0x100")
@@ -31,6 +31,15 @@ SIMULATE      = os.getenv("SIMULATE", "false").lower() == "true"
 
 RELAY_MAP     = {0: "fan", 1: "battery"}
 COMMAND_MAP   = {0: "off", 1: "on", 2: "auto"}
+
+
+def _is_no_such_device(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return "no such device" in text or "errno 19" in text
+
+
+def _interface_exists(name: str) -> bool:
+    return os.path.exists(f"/sys/class/net/{name}")
 
 
 class CanStatus:
@@ -95,6 +104,16 @@ async def run(status: CanStatus, relay_callback) -> None:
             await asyncio.sleep(1)
             continue
 
+        if not _interface_exists(INTERFACE):
+            status.enabled = False
+            status.record_error(
+                f"CAN disabled: interface '{INTERFACE}' not found. "
+                "Enable CAN hardware or set CAN_ENABLED=false."
+            )
+            log.warning("CAN interface %s not found - disabling CAN runtime", INTERFACE)
+            await asyncio.sleep(1)
+            continue
+
         # Bring up the CAN interface if not already up
         await _ensure_interface_up(status)
 
@@ -144,6 +163,13 @@ async def run(status: CanStatus, relay_callback) -> None:
             msg = f"CAN error: {exc}"
             log.error(msg)
             status.record_error(msg)
+            if _is_no_such_device(exc):
+                status.enabled = False
+                status.record_error(
+                    f"CAN disabled: interface '{INTERFACE}' not found. "
+                    "Enable CAN hardware or set CAN_ENABLED=false."
+                )
+                log.warning("CAN interface %s not found - disabling CAN runtime", INTERFACE)
             await asyncio.sleep(5 if status.enabled else 1)  # back-off before retry
 
 

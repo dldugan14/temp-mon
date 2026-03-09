@@ -69,13 +69,16 @@ def _simulate() -> List[ModbusSensorReading]:
 
 # ── Real hardware ─────────────────────────────────────────────────────────────
 _client = None
+_disabled_due_to_error = False
 
 
 def _get_client():
     """Return (and lazily create) the shared Modbus RTU client."""
-    global _client
+    global _client, _disabled_due_to_error
     if _client is not None:
         return _client
+    if _disabled_due_to_error:
+        return None
     try:
         from pymodbus.client import ModbusSerialClient  # type: ignore
         _client = ModbusSerialClient(
@@ -88,11 +91,13 @@ def _get_client():
         )
         if not _client.connect():
             log.error("Modbus: could not open %s", PORT)
+            _disabled_due_to_error = True
             _client = None
         else:
             log.info("Modbus RTU connected on %s @ %d baud", PORT, BAUD)
     except Exception as exc:
         log.error("Modbus init failed: %s", exc)
+        _disabled_due_to_error = True
         _client = None
     return _client
 
