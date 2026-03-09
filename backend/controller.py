@@ -21,6 +21,8 @@ from modbus_sensors import read_all as read_modbus, ModbusSensorReading
 from relay import Relay, cleanup_all
 import can_commander
 from can_commander import CanStatus
+import jk_bms
+from jk_bms import BMSReading
 
 # ── Feature flags (initial values from env; can be toggled at runtime) ────────────
 CAN_ENABLED = os.getenv("CAN_ENABLED", "true").lower() == "true"
@@ -54,6 +56,7 @@ class SystemState:
     fan_off_temp: float
     bat_on_temp: float
     bat_off_temp: float
+    bms: BMSReading | None = None
 
 
 class Controller:
@@ -89,6 +92,17 @@ class Controller:
 
     # ── Serialisation ──────────────────────────────────────────────────────────
 
+    def _serialize_bms(self, bms: BMSReading) -> Dict[str, Any]:
+        return {
+            "pack_voltage": bms.pack_voltage,
+            "pack_current": bms.pack_current,
+            "soc": bms.soc,
+            "cell_voltages": bms.cell_voltages,
+            "temperatures": bms.temperatures,
+            "error": bms.error,
+            "timestamp": bms.timestamp,
+        }
+
     def _serialise(self, state: SystemState) -> Dict[str, Any]:
         sensors = []
         for s in state.sensors:
@@ -112,6 +126,7 @@ class Controller:
                 "poll_interval": POLL_INTERVAL,
             },
             "can": self.can_status.to_dict(),
+            "bms": self._serialize_bms(state.bms) if state.bms else None,
         }
 
     # ── Sensor merging + control logic ────────────────────────────────────────
@@ -158,7 +173,7 @@ class Controller:
         elif max_temp <= BAT_OFF_TEMP:
             self.bat_relay.set_auto(False)
 
-    def _build_state(self, sensor_dicts: List[Dict[str, Any]]) -> SystemState:
+    def _build_state(self, sensor_dicts: List[Dict[str, Any]], bms_data: BMSReading | None = None) -> SystemState:
         return SystemState(
             sensors=sensor_dicts,
             relays={
@@ -170,6 +185,7 @@ class Controller:
             fan_off_temp=FAN_OFF_TEMP,
             bat_on_temp=BAT_ON_TEMP,
             bat_off_temp=BAT_OFF_TEMP,
+            bms=bms_data,
         )
 
     def set_can_enabled(self, enabled: bool) -> None:
@@ -188,7 +204,7 @@ class Controller:
         elif action == "auto":
             target.clear_override()
         if self._last_state:
-            state = self._build_state(self._last_state.sensors)
+            state = self._build_state(self._last_state.sensors, self._last_state.bms)
             self._last_state = state
             self._broadcast(state)
 
@@ -219,7 +235,8 @@ class Controller:
         if sensor_dicts is None and self._last_state:
             sensor_dicts = self._last_state.sensors
         if sensor_dicts:
-            state = self._build_state(sensor_dicts)
+            bms_data = self._last_state.bms if self._last_state else None
+            state = self._build_state(sensor_dicts, bms_data)
             self._last_state = state
             if force_broadcast:
                 self._broadcast(state)
@@ -240,9 +257,10 @@ class Controller:
                 try:
                     onewire = read_1wire()
                     modbus  = read_modbus()
+                    bms_data = jk_bms.read()
                     sensor_dicts = self._merge_sensors(onewire, modbus)
                     self._evaluate(sensor_dicts)
-                    state = self._build_state(sensor_dicts)
+                    state = self._build_state(sensor_dicts, bms_data)
                     self._last_state = state
                     self._broadcast(state)
                 except Exception as exc:

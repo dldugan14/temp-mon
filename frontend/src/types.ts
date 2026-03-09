@@ -31,6 +31,16 @@ export interface CanStatus {
   frame_count: number;
 }
 
+export interface BMSData {
+  pack_voltage: number;
+  pack_current: number;
+  soc: number;
+  cell_voltages: number[];
+  temperatures: number[];
+  error: boolean;
+  timestamp: number;
+}
+
 export interface SystemState {
   sensors: SensorData[];
   relays: {
@@ -40,4 +50,5 @@ export interface SystemState {
   timestamp: number;
   config: Config;
   can?: CanStatus;
+  bms?: BMSData | null;
 }

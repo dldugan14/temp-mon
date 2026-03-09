@@ -3,6 +3,7 @@ import Header from "./components/Header";
 import SensorGrid from "./components/SensorGrid";
 import RelayPanel from "./components/RelayPanel";
 import ConfigBounds from "./components/ConfigBounds";
+import BMSPanel from "./components/BMSPanel";
 import { useSystemState } from "./hooks/useSystemState";
 
 export default function App() {
@@ -28,6 +29,7 @@ export default function App() {
 
           {state && (
             <>
+                            {state.bms && <BMSPanel bms={state.bms} />}
               <SensorGrid
                 sensors={state.sensors}
                 config={state.config}
