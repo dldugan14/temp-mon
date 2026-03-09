@@ -31,7 +31,9 @@ export default function BMSPanel({ bms }: Props) {
             <BatteryAlertIcon color="error" />
             <Typography variant="h6">Battery Management System</Typography>
           </Box>
-          <Typography color="error.main">BMS connection error or disabled</Typography>
+          <Typography color="error.main">
+            {bms.error_message || "BMS connection error or disabled"}
+          </Typography>
         </CardContent>
       </Card>
     );

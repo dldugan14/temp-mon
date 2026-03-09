@@ -38,6 +38,7 @@ export interface BMSData {
   cell_voltages: number[];
   temperatures: number[];
   error: boolean;
+  error_message?: string | null;
   timestamp: number;
 }
 

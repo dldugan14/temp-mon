@@ -25,6 +25,8 @@ BAUD           = int(os.getenv("JK_BMS_BAUD", "115200"))
 UNIT_ID        = int(os.getenv("JK_BMS_UNIT_ID", "1"))
 TIMEOUT        = float(os.getenv("JK_BMS_TIMEOUT", "1.0"))
 NUM_CELLS      = int(os.getenv("JK_BMS_NUM_CELLS", "16"))
+BAUD_CANDIDATES_RAW = os.getenv("JK_BMS_BAUD_CANDIDATES", f"{BAUD},9600,19200,38400,115200")
+UNIT_CANDIDATES_RAW = os.getenv("JK_BMS_UNIT_CANDIDATES", f"{UNIT_ID},1,2,3,4")
 
 # JK BMS common register map (may vary by model)
 REG_PACK_VOLTAGE = 0x70      # 0.01V per unit
@@ -42,6 +44,7 @@ class BMSReading:
     cell_voltages: List[float]  # V
     temperatures: List[float]   # °C
     error: bool = False
+    error_message: str | None = None
     timestamp: float = 0.0
 
 
@@ -92,33 +95,101 @@ def _simulate() -> BMSReading:
 # ── Real hardware ─────────────────────────────────────────────────────────────
 _client = None
 _disabled_due_to_error = False
+_active_baud = BAUD
+_active_unit_id = UNIT_ID
+_last_error: str | None = None
+
+
+def _parse_int_list(raw: str) -> list[int]:
+    values: list[int] = []
+    for item in raw.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        try:
+            value = int(item)
+            if value not in values:
+                values.append(value)
+        except ValueError:
+            continue
+    return values
+
+
+def _is_plausible_pack(pack_regs: list[int]) -> bool:
+    if len(pack_regs) < 3:
+        return False
+    pack_voltage = pack_regs[0] * 0.01
+    soc = pack_regs[2] * 0.01
+    return 1.0 <= pack_voltage <= 120.0 and 0.0 <= soc <= 100.0
 
 
 def _get_client():
     """Return (and lazily create) the shared Modbus RTU client for JK BMS."""
-    global _client, _disabled_due_to_error
+    global _client, _disabled_due_to_error, _active_baud, _active_unit_id, _last_error
     if _client is not None:
         return _client
     if _disabled_due_to_error:
         return None
+
+    baud_candidates = _parse_int_list(BAUD_CANDIDATES_RAW)
+    unit_candidates = _parse_int_list(UNIT_CANDIDATES_RAW)
+    if not baud_candidates:
+        baud_candidates = [BAUD]
+    if not unit_candidates:
+        unit_candidates = [UNIT_ID]
+
     try:
         from pymodbus.client import ModbusSerialClient  # type: ignore
-        _client = ModbusSerialClient(
-            port=PORT,
-            baudrate=BAUD,
-            bytesize=8,
-            parity="N",
-            stopbits=1,
-            timeout=TIMEOUT,
-        )
-        if not _client.connect():
-            log.error("JK BMS: could not open %s", PORT)
+        for baud in baud_candidates:
+            candidate = ModbusSerialClient(
+                port=PORT,
+                baudrate=baud,
+                bytesize=8,
+                parity="N",
+                stopbits=1,
+                timeout=TIMEOUT,
+            )
+            if not candidate.connect():
+                continue
+
+            matched = False
+            for unit in unit_candidates:
+                try:
+                    rr = candidate.read_holding_registers(REG_PACK_VOLTAGE, count=3, slave=unit)
+                    if rr.isError():
+                        continue
+                    if not _is_plausible_pack(rr.registers):
+                        continue
+                    _client = candidate
+                    _active_baud = baud
+                    _active_unit_id = unit
+                    _last_error = None
+                    matched = True
+                    log.info(
+                        "JK BMS connected on %s @ %d baud (unit %d)",
+                        PORT,
+                        _active_baud,
+                        _active_unit_id,
+                    )
+                    break
+                except Exception:
+                    continue
+
+            if matched:
+                break
+
+            candidate.close()
+
+        if _client is None:
+            _last_error = (
+                "No valid Modbus response from JK BMS. Check JK_BMS_BAUD/UNIT_ID, "
+                "A/B wiring, and that your BMS model uses Modbus RTU on RS485."
+            )
+            log.error("JK BMS read probe failed on %s (%s)", PORT, _last_error)
             _disabled_due_to_error = True
-            _client = None
-        else:
-            log.info("JK BMS connected on %s @ %d baud (unit %d)", PORT, BAUD, UNIT_ID)
     except Exception as exc:
         log.error("JK BMS init failed: %s", exc)
+        _last_error = str(exc)
         _disabled_due_to_error = True
         _client = None
     return _client
@@ -126,12 +197,15 @@ def _get_client():
 
 def _read_registers(client, start: int, count: int) -> Optional[List[int]]:
     """Read holding registers, return list or None on error."""
+    global _last_error
     try:
-        rr = client.read_holding_registers(start, count=count, slave=UNIT_ID)
+        rr = client.read_holding_registers(start, count=count, slave=_active_unit_id)
         if rr.isError():
+            _last_error = f"Modbus error reading register 0x{start:04X}"
             return None
         return rr.registers
     except Exception as exc:
+        _last_error = str(exc)
         log.debug("JK BMS register read error at 0x%X: %s", start, exc)
         return None
 
@@ -152,6 +226,7 @@ def read() -> Optional[BMSReading]:
             cell_voltages=[],
             temperatures=[],
             error=True,
+            error_message=_last_error or "JK BMS connection failed",
             timestamp=time.time(),
         )
 
@@ -165,6 +240,7 @@ def read() -> Optional[BMSReading]:
             cell_voltages=[],
             temperatures=[],
             error=True,
+            error_message=_last_error or "JK BMS pack registers not readable",
             timestamp=time.time(),
         )
 
@@ -197,5 +273,7 @@ def read() -> Optional[BMSReading]:
         soc=round(soc, 1),
         cell_voltages=[round(v, 3) for v in cell_voltages],
         temperatures=[round(t, 1) for t in temperatures],
+        error=False,
+        error_message=None,
         timestamp=time.time(),
     )

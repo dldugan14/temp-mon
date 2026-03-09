@@ -100,6 +100,7 @@ class Controller:
             "cell_voltages": bms.cell_voltages,
             "temperatures": bms.temperatures,
             "error": bms.error,
+            "error_message": bms.error_message,
             "timestamp": bms.timestamp,
         }
 
