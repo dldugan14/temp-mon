@@ -123,7 +123,10 @@ async def run(status: CanStatus, relay_callback) -> None:
             status.error = None
             try:
                 while status.enabled:
-                    msg = await asyncio.to_thread(bus.recv, 1.0)
+                    try:
+                        msg = await asyncio.to_thread(bus.recv, 1.0)
+                    except asyncio.CancelledError:
+                        return
                     if msg is None:
                         continue
 

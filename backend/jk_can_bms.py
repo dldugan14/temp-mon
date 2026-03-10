@@ -216,12 +216,17 @@ async def run(can_status: CanStatus) -> None:
 
             try:
                 while can_status.enabled:
-                    msg = await asyncio.to_thread(bus.recv, 1.0)
+                    try:
+                        msg = await asyncio.to_thread(bus.recv, 1.0)
+                    except asyncio.CancelledError:
+                        return
                     if msg is None:
                         continue
                     _decode_frame(msg.arbitration_id, bytes(msg.data))
             finally:
                 bus.shutdown()
+        except asyncio.CancelledError:
+            return
         except Exception as exc:
             _state.error_message = f"JK CAN BMS error: {exc}"
             log.error(_state.error_message)
