@@ -212,21 +212,15 @@ async def run(can_status: CanStatus) -> None:
 
         try:
             bus = can.Bus(channel=INTERFACE, interface="socketcan")
-            reader = can.AsyncBufferedReader()
-            notifier = can.Notifier(bus, [reader], loop=asyncio.get_event_loop())
             log.info("JK CAN BMS decoder listening on %s", INTERFACE)
 
             try:
                 while can_status.enabled:
-                    try:
-                        msg = await asyncio.wait_for(reader.get_message(), timeout=1.0)
-                    except asyncio.TimeoutError:
-                        continue
+                    msg = await asyncio.to_thread(bus.recv, 1.0)
                     if msg is None:
                         continue
                     _decode_frame(msg.arbitration_id, bytes(msg.data))
             finally:
-                notifier.stop()
                 bus.shutdown()
         except Exception as exc:
             _state.error_message = f"JK CAN BMS error: {exc}"

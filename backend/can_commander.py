@@ -121,16 +121,11 @@ async def run(status: CanStatus, relay_callback) -> None:
             bus = can.Bus(channel=INTERFACE, interface="socketcan")
             log.info("CAN commander listening on %s (ID 0x%X)", INTERFACE, CMD_ID)
             status.error = None
-
-            reader = can.AsyncBufferedReader()
-            notifier = can.Notifier(bus, [reader], loop=asyncio.get_event_loop())
-
             try:
-                async for msg in reader:
-                    # Honour runtime disable – break so bus gets shut down cleanly
-                    if not status.enabled:
-                        log.info("CAN commander disabled at runtime – closing bus")
-                        break
+                while status.enabled:
+                    msg = await asyncio.to_thread(bus.recv, 1.0)
+                    if msg is None:
+                        continue
 
                     if msg.arbitration_id != CMD_ID:
                         continue
@@ -154,9 +149,7 @@ async def run(status: CanStatus, relay_callback) -> None:
                     log.info("CAN → relay=%s action=%s", relay_name, action)
                     status.record_command(relay_name, action)
                     relay_callback(relay_name, action)
-
             finally:
-                notifier.stop()
                 bus.shutdown()
 
         except Exception as exc:
