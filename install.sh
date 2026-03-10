@@ -43,8 +43,43 @@ cd frontend
 npm run build
 cd ..
 
-echo "==> [4/4] Done!"
+echo "==> [4/5] Configuring systemd autostart..."
+
+if command -v systemctl >/dev/null 2>&1; then
+  SERVICE_USER="${SUDO_USER:-$USER}"
+  SERVICE_PATH="/etc/systemd/system/temp-mon.service"
+
+  sudo tee "$SERVICE_PATH" > /dev/null <<EOF
+[Unit]
+Description=Temp-Mon Temperature Monitor
+After=network.target
+
+[Service]
+Type=simple
+User=${SERVICE_USER}
+WorkingDirectory=${SCRIPT_DIR}
+ExecStart=${VENV_DIR}/bin/python ${SCRIPT_DIR}/backend/main.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SupplementaryGroups=gpio
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now temp-mon.service
+  echo "    temp-mon.service enabled and started"
+else
+  echo "    systemd not found; skipping autostart setup"
+fi
+
+echo "==> [5/5] Done!"
 echo ""
-echo "  Start the server with:  ./start.sh"
-echo "  Then open:              http://localhost:8000"
+echo "  Temp-Mon service:       temp-mon.service"
+echo "  Service status:         sudo systemctl status temp-mon --no-pager"
+echo "  Service logs:           sudo journalctl -u temp-mon -f"
+echo "  Open:                   http://localhost:8000"
 echo "  (venv location: $VENV_DIR)"

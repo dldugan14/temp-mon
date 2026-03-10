@@ -91,7 +91,7 @@ chmod +x install.sh start.sh
 ./install.sh
 ```
 
-> **First run only.** This installs Python packages, enables the 1-Wire overlay, installs npm deps, and builds the React frontend into `frontend/dist/`.
+> **First run only.** This installs Python packages, enables the 1-Wire overlay, installs npm deps, builds the React frontend into `frontend/dist/`, and enables `temp-mon.service` for automatic startup.
 
 ### 4 – Start
 
@@ -105,11 +105,10 @@ Open `http://<pi-ip>:8000` in any browser on your network.
 
 ## Autostart (systemd)
 
+Autostart is configured automatically by `./install.sh`.
+
 ```bash
-# Adjust the path inside temp-mon.service if your user isn't 'pi'
-sudo cp temp-mon.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now temp-mon
+sudo systemctl status temp-mon --no-pager
 sudo journalctl -u temp-mon -f   # view logs
 ```
 
