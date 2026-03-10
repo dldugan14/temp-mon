@@ -8,7 +8,7 @@ interface Props {
 }
 
 function getTempColor(temp: number, config: Config): string {
-  if (temp >= config.bat_on_temp) return "#f44336";       // red – battery threshold
+  if (temp >= config.bat_off_temp) return "#f44336";       // red – battery threshold
   if (temp >= config.fan_on_temp) return "#ff9800";       // orange – fan threshold
   if (temp <= config.fan_off_temp - 5) return "#29b6f6"; // cool blue
   return "#4caf50";                                        // green – safe range
