@@ -218,16 +218,16 @@ async def run(can_status: CanStatus) -> None:
 
             try:
                 while can_status.enabled:
-                    msg = await asyncio.wait_for(reader.get_message(), timeout=1.0)
+                    try:
+                        msg = await asyncio.wait_for(reader.get_message(), timeout=1.0)
+                    except asyncio.TimeoutError:
+                        continue
                     if msg is None:
                         continue
                     _decode_frame(msg.arbitration_id, bytes(msg.data))
             finally:
                 notifier.stop()
                 bus.shutdown()
-
-        except asyncio.TimeoutError:
-            continue
         except Exception as exc:
             _state.error_message = f"JK CAN BMS error: {exc}"
             log.error(_state.error_message)
