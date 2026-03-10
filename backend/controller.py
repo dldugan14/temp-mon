@@ -22,6 +22,7 @@ from relay import Relay, cleanup_all
 import can_commander
 from can_commander import CanStatus
 import jk_bms
+import jk_can_bms
 from jk_bms import BMSReading
 
 # ── Feature flags (initial values from env; can be toggled at runtime) ────────────
@@ -37,6 +38,7 @@ BAT_OFF_TEMP = float(os.getenv("BAT_OFF_TEMP", "35.0"))
 FAN_PIN      = int(os.getenv("FAN_RELAY_PIN",  "17"))
 BAT_PIN      = int(os.getenv("BAT_RELAY_PIN",  "27"))
 POLL_INTERVAL = float(os.getenv("POLL_INTERVAL", "5"))
+JK_BMS_SOURCE = os.getenv("JK_BMS_SOURCE", "rs485").lower()
 
 
 @dataclass
@@ -253,12 +255,21 @@ class Controller:
             name="can-commander",
         )
 
+        if JK_BMS_SOURCE == "can":
+            asyncio.create_task(
+                jk_can_bms.run(self.can_status),
+                name="jk-can-bms",
+            )
+            log.info("JK BMS source: CAN")
+        else:
+            log.info("JK BMS source: RS485")
+
         try:
             while True:
                 try:
                     onewire = read_1wire()
                     modbus  = read_modbus()
-                    bms_data = jk_bms.read()
+                    bms_data = jk_can_bms.get_latest() if JK_BMS_SOURCE == "can" else jk_bms.read()
                     sensor_dicts = self._merge_sensors(onewire, modbus)
                     self._evaluate(sensor_dicts)
                     state = self._build_state(sensor_dicts, bms_data)
