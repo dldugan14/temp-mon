@@ -167,13 +167,16 @@ class Controller:
         if not temps:
             return
         max_temp = max(temps)
+        min_temp = min(temps)
         if max_temp >= FAN_ON_TEMP:
             self.fan_relay.set_auto(True)
         elif max_temp <= FAN_OFF_TEMP:
             self.fan_relay.set_auto(False)
+        # Battery ON: any sensor >= BAT_ON_TEMP  (use max)
+        # Battery OFF: any sensor <= BAT_OFF_TEMP (use min)
         if max_temp >= BAT_ON_TEMP:
             self.bat_relay.set_auto(True)
-        elif max_temp <= BAT_OFF_TEMP:
+        elif min_temp <= BAT_OFF_TEMP:
             self.bat_relay.set_auto(False)
 
     def _build_state(self, sensor_dicts: List[Dict[str, Any]], bms_data: BMSReading | None = None) -> SystemState:

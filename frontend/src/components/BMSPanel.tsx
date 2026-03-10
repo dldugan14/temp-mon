@@ -1,5 +1,6 @@
+import React from "react";
 import { Card, CardContent, Typography, Box, Grid, LinearProgress, Chip } from "@mui/material";
-import BatteryChargingFullIcon from "@mui/icons-material/BatteryChargingFull";
+import BatteryFullIcon from "@mui/icons-material/BatteryFull";
 import BatteryAlertIcon from "@mui/icons-material/BatteryAlert";
 import BoltIcon from "@mui/icons-material/Bolt";
 import ThermostatIcon from "@mui/icons-material/Thermostat";
@@ -50,7 +51,7 @@ export default function BMSPanel({ bms }: Props) {
     <Card>
       <CardContent>
         <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2 }}>
-          <BatteryChargingFullIcon sx={{ color: socColor }} />
+          <BatteryFullIcon sx={{ color: socColor }} />
           <Typography variant="h6">Battery Management System</Typography>
           {isCharging && (
             <Chip
