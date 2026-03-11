@@ -13,7 +13,7 @@ export default function App() {
     <Box sx={{ minHeight: "100vh", bgcolor: "background.default", py: 2 }}>
       <Container maxWidth="lg">
         <Stack spacing={2}>
-          <Header status={status} lastSeen={state?.timestamp ?? null} />
+          <Header status={status} lastSeen={state?.timestamp ?? null} safety={state?.safety} />
 
           {status === "disconnected" && (
             <Alert severity="error" variant="outlined">
@@ -34,7 +34,7 @@ export default function App() {
                 sensors={state.sensors}
                 config={state.config}
               />
-              <RelayPanel relays={state.relays} />
+              <RelayPanel relays={state.relays} safety={state.safety} />
               <ConfigBounds config={state.config} can={state.can} />
             </>
           )}

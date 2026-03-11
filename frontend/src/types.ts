@@ -31,6 +31,11 @@ export interface CanStatus {
   frame_count: number;
 }
 
+export interface SafetyStatus {
+  battery_lockout: boolean;
+  battery_lockout_reason: "over_temp" | "no_reading" | null;
+}
+
 export interface BMSData {
   pack_voltage: number;
   pack_current: number;
@@ -48,6 +53,7 @@ export interface SystemState {
     fan: RelayData;
     battery: RelayData;
   };
+  safety?: SafetyStatus;
   timestamp: number;
   config: Config;
   can?: CanStatus;

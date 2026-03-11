@@ -73,8 +73,8 @@ Edit `.env` to match your hardware and desired thresholds:
 ```ini
 FAN_ON_TEMP=30.0      # Any sensor >= this → fan ON
 FAN_OFF_TEMP=25.0     # All sensors <= this → fan OFF
-BAT_ON_TEMP=40.0      # Any sensor >= this → battery relay ON
-BAT_OFF_TEMP=35.0     # All sensors <= this → battery relay OFF
+BAT_ON_TEMP=-20.0     # Any sensor <= this → battery relay ON (cold threshold)
+BAT_OFF_TEMP=55.0     # Any sensor >= this → battery relay OFF (hot lockout)
 
 FAN_RELAY_PIN=17
 BAT_RELAY_PIN=27
@@ -100,6 +100,11 @@ chmod +x install.sh start.sh
 ```
 
 Open `http://<pi-ip>:8000` in any browser on your network.
+
+> If you enabled `temp-mon.service` (via `./install.sh`), do not also run `./start.sh` at the same time.
+>
+> - **Service mode:** `sudo systemctl restart temp-mon`
+> - **Manual mode:** `sudo systemctl stop temp-mon` then `./start.sh`
 
 ---
 
@@ -170,8 +175,10 @@ Hysteretic (deadband) control prevents rapid relay cycling:
 Fan ON   → when max(sensors) ≥ FAN_ON_TEMP
 Fan OFF  → when max(sensors) ≤ FAN_OFF_TEMP
 
-Battery ON  → when max(sensors) ≥ BAT_ON_TEMP
-Battery OFF → when max(sensors) ≤ BAT_OFF_TEMP
+Battery ON  → when min(sensors) ≤ BAT_ON_TEMP
+Battery OFF → when max(sensors) ≥ BAT_OFF_TEMP
+
+Safety lockout: battery relay cannot be turned ON (auto, UI override, or CAN) while any valid sensor is at or above BAT_OFF_TEMP.
 ```
 
 Manual overrides from the UI take priority over automatic control until explicitly released.

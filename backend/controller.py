@@ -120,6 +120,10 @@ class Controller:
                 k: {"name": v.name, "pin": v.pin, "state": v.state, "is_overridden": v.is_overridden}
                 for k, v in state.relays.items()
             },
+            "safety": {
+                "battery_lockout": self._battery_too_hot(state.sensors),
+                "battery_lockout_reason": self._battery_interlock_reason(state.sensors),
+            },
             "timestamp": state.timestamp,
             "config": {
                 "fan_on_temp":   state.fan_on_temp,
@@ -162,7 +166,29 @@ class Controller:
             and not math.isnan(s["temperature"])
         ]
 
+    def _battery_too_hot(self, sensor_dicts: List[Dict[str, Any]] | None = None) -> bool:
+        return self._battery_interlock_reason(sensor_dicts) is not None
+
+    def _battery_interlock_reason(self, sensor_dicts: List[Dict[str, Any]] | None = None) -> str | None:
+        if sensor_dicts is None:
+            sensor_dicts = self._last_state.sensors if self._last_state else []
+        temps = self._valid_temps(sensor_dicts)
+        if not temps:
+            return "no_reading"
+        if max(temps) >= BAT_OFF_TEMP:
+            return "over_temp"
+        return None
+
+    def _enforce_battery_interlock(self, sensor_dicts: List[Dict[str, Any]] | None = None) -> bool:
+        unsafe = self._battery_too_hot(sensor_dicts)
+        if unsafe:
+            if self.bat_relay.is_overridden:
+                self.bat_relay.clear_override()
+            self.bat_relay.set_auto(False)
+        return unsafe
+
     def _evaluate(self, sensor_dicts: List[Dict[str, Any]]) -> None:
+        battery_unsafe = self._enforce_battery_interlock(sensor_dicts)
         temps = self._valid_temps(sensor_dicts)
         if not temps:
             return
@@ -172,12 +198,9 @@ class Controller:
             self.fan_relay.set_auto(True)
         elif max_temp <= FAN_OFF_TEMP:
             self.fan_relay.set_auto(False)
-        # Battery ON: any sensor >= BAT_ON_TEMP  (use max)
-        # Battery OFF: any sensor <= BAT_OFF_TEMP (use min)
-        if max_temp >= BAT_ON_TEMP:
+        # Battery ON only in safe region (interlock above already forced OFF when unsafe).
+        if not battery_unsafe and min_temp <= BAT_ON_TEMP:
             self.bat_relay.set_auto(True)
-        elif min_temp <= BAT_OFF_TEMP:
-            self.bat_relay.set_auto(False)
 
     def _build_state(self, sensor_dicts: List[Dict[str, Any]], bms_data: BMSReading | None = None) -> SystemState:
         return SystemState(
@@ -204,11 +227,16 @@ class Controller:
         """Called by the CAN listener when a valid relay command frame arrives."""
         target = self.fan_relay if relay_name == "fan" else self.bat_relay
         if action == "on":
-            target.set_override(True)
+            if relay_name == "battery" and self._enforce_battery_interlock():
+                pass
+            else:
+                target.set_override(True)
         elif action == "off":
             target.set_override(False)
         elif action == "auto":
             target.clear_override()
+            if relay_name == "battery":
+                self._enforce_battery_interlock()
         if self._last_state:
             state = self._build_state(self._last_state.sensors, self._last_state.bms)
             self._last_state = state
@@ -225,6 +253,9 @@ class Controller:
         relay = {"fan": self.fan_relay, "battery": self.bat_relay}.get(name)
         if relay is None:
             return False
+        if name == "battery" and state and self._enforce_battery_interlock():
+            self._refresh_state(force_broadcast=True)
+            return True
         relay.set_override(state)
         self._refresh_state(force_broadcast=True)
         return True
@@ -234,6 +265,8 @@ class Controller:
         if relay is None:
             return False
         relay.clear_override()
+        if name == "battery":
+            self._enforce_battery_interlock()
         self._refresh_state(force_broadcast=True)
         return True
 
@@ -247,16 +280,17 @@ class Controller:
             if force_broadcast:
                 self._broadcast(state)
 
+    def _read_inputs(self) -> tuple[List[Dict[str, Any]], BMSReading | None]:
+        onewire = read_1wire()
+        modbus = read_modbus()
+        bms_data = jk_can_bms.get_latest() if JK_BMS_SOURCE == "can" else jk_bms.read()
+        sensor_dicts = self._merge_sensors(onewire, modbus)
+        return sensor_dicts, bms_data
+
     # ── Main sensor-polling loop ──────────────────────────────────────────────
 
     async def run(self) -> None:
         log.info("Controller started – poll every %ss", POLL_INTERVAL)
-
-        # Start CAN commander – it loops forever and respects can_status.enabled at runtime
-        asyncio.create_task(
-            can_commander.run(self.can_status, self.can_relay_callback),
-            name="can-commander",
-        )
 
         if JK_BMS_SOURCE == "can":
             asyncio.create_task(
@@ -267,19 +301,45 @@ class Controller:
         else:
             log.info("JK BMS source: RS485")
 
+        # First-startup gate: require a valid temperature check before relay power decisions.
+        while True:
+            try:
+                sensor_dicts, bms_data = self._read_inputs()
+                if not self._valid_temps(sensor_dicts):
+                    state = self._build_state(sensor_dicts, bms_data)
+                    self._last_state = state
+                    self._broadcast(state)
+                    log.warning("Startup temp check deferred: no valid sensor temperatures yet")
+                    await asyncio.sleep(POLL_INTERVAL)
+                    continue
+
+                self._evaluate(sensor_dicts)
+                state = self._build_state(sensor_dicts, bms_data)
+                self._last_state = state
+                self._broadcast(state)
+                log.info("Startup temp check complete; initial relay state applied")
+                break
+            except Exception as exc:
+                log.error("Startup temp check failed: %s", exc)
+                await asyncio.sleep(POLL_INTERVAL)
+
+        # Start CAN commander after startup temp gate; it loops forever and respects can_status.enabled at runtime.
+        asyncio.create_task(
+            can_commander.run(self.can_status, self.can_relay_callback),
+            name="can-commander",
+        )
+
         try:
             while True:
                 try:
-                    onewire = read_1wire()
-                    modbus  = read_modbus()
-                    bms_data = jk_can_bms.get_latest() if JK_BMS_SOURCE == "can" else jk_bms.read()
-                    sensor_dicts = self._merge_sensors(onewire, modbus)
+                    sensor_dicts, bms_data = self._read_inputs()
                     self._evaluate(sensor_dicts)
                     state = self._build_state(sensor_dicts, bms_data)
                     self._last_state = state
                     self._broadcast(state)
                 except Exception as exc:
                     log.error("Controller loop error: %s", exc)
+                    self._enforce_battery_interlock([])
                 await asyncio.sleep(POLL_INTERVAL)
         finally:
             cleanup_all([self.fan_relay, self.bat_relay])

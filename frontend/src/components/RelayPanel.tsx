@@ -16,16 +16,19 @@ import AutoModeIcon from "@mui/icons-material/AutoMode";
 import PowerOffIcon from "@mui/icons-material/PowerOff";
 import { useState } from "react";
 import { setRelayOverride, clearRelayOverride } from "../hooks/useSystemState";
-import type { RelayData } from "../types";
+import type { RelayData, SafetyStatus } from "../types";
 
 interface RelayCardProps {
   relay: RelayData;
   label: string;
   icon: React.ReactNode;
+  batteryLockoutReason?: SafetyStatus["battery_lockout_reason"];
 }
 
-function RelayCard({ relay, label, icon }: RelayCardProps) {
+function RelayCard({ relay, label, icon, batteryLockoutReason }: RelayCardProps) {
   const [busy, setBusy] = useState(false);
+  const batteryLockout = relay.name === "battery" && !!batteryLockoutReason;
+  const lockoutText = batteryLockoutReason === "over_temp" ? "Battery: Over Temp" : "Battery: No Reading";
 
   const handleOverride = async (on: boolean) => {
     setBusy(true);
@@ -74,16 +77,25 @@ function RelayCard({ relay, label, icon }: RelayCardProps) {
             variant="outlined"
             color={relay.is_overridden ? "secondary" : "default"}
           />
+
+          {batteryLockout && (
+            <Chip
+              label={lockoutText}
+              size="small"
+              color="error"
+              variant="outlined"
+            />
+          )}
         </Stack>
 
         {/* Control buttons */}
         <Stack direction="row" spacing={1}>
-          <Tooltip title="Force ON">
+          <Tooltip title={batteryLockout ? lockoutText : "Force ON"}>
             <span>
               <IconButton
                 size="small"
                 color="warning"
-                disabled={busy || (relay.state && relay.is_overridden)}
+                disabled={busy || (relay.state && relay.is_overridden) || batteryLockout}
                 onClick={() => handleOverride(true)}
                 sx={{ border: "1px solid", borderColor: "warning.main", borderRadius: 1.5 }}
               >
@@ -127,9 +139,10 @@ function RelayCard({ relay, label, icon }: RelayCardProps) {
 
 interface Props {
   relays: { fan: RelayData; battery: RelayData };
+  safety?: SafetyStatus;
 }
 
-export default function RelayPanel({ relays }: Props) {
+export default function RelayPanel({ relays, safety }: Props) {
   return (
     <>
       <Typography variant="overline" color="text.secondary" sx={{ pl: 0.5 }}>
@@ -148,6 +161,7 @@ export default function RelayPanel({ relays }: Props) {
             relay={relays.battery}
             label="Battery Power"
             icon={<BatteryChargingFullIcon />}
+            batteryLockoutReason={safety?.battery_lockout_reason ?? null}
           />
         </Grid>
       </Grid>

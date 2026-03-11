@@ -14,9 +14,11 @@ interface BoundRowProps {
   onTemp: number;
   offTemp: number;
   onColor: string;
+  onText?: string;
+  offText?: string;
 }
 
-function BoundRow({ icon, label, onTemp, offTemp, onColor }: BoundRowProps) {
+function BoundRow({ icon, label, onTemp, offTemp, onColor, onText, offText }: BoundRowProps) {
   return (
     <Stack direction="row" alignItems="center" spacing={1.5} flexWrap="wrap">
       <Stack direction="row" alignItems="center" spacing={0.5} sx={{ minWidth: 90 }}>
@@ -29,14 +31,14 @@ function BoundRow({ icon, label, onTemp, offTemp, onColor }: BoundRowProps) {
       <Stack direction="row" alignItems="center" spacing={0.5}>
         <ArrowUpwardIcon sx={{ fontSize: 14, color: onColor }} />
         <Typography variant="body2" sx={{ color: onColor, fontWeight: 700 }}>
-          ON ≥ {onTemp}°C
+          ON {onText ?? "≥"} {onTemp}°C
         </Typography>
       </Stack>
 
       <Stack direction="row" alignItems="center" spacing={0.5}>
         <ArrowDownwardIcon sx={{ fontSize: 14, color: "primary.main" }} />
         <Typography variant="body2" sx={{ color: "primary.main", fontWeight: 700 }}>
-          OFF ≤ {offTemp}°C
+          OFF {offText ?? "≤"} {offTemp}°C
         </Typography>
       </Stack>
     </Stack>
@@ -85,6 +87,8 @@ export default function ConfigBounds({ config, can }: Props) {
                 onTemp={config.bat_on_temp}
                 offTemp={config.bat_off_temp}
                 onColor="#f44336"
+                onText="≤"
+                offText="≥"
               />
             </Grid>
           </Grid>
